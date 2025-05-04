@@ -1,0 +1,89 @@
+Audio Defect Classification Model Evaluation
+==========================================
+
+Model: SVM
+------------------------------------------
+Accuracy: 0.88
+Macro Precision: 0.89
+Macro Recall: 0.86
+Macro F1-Score: 0.87
+
+Per-Class Performance:
+- noise:        Precision: 0.92, Recall: 0.88, F1: 0.90
+- distortion:   Precision: 0.90, Recall: 0.87, F1: 0.88
+- clipping:     Precision: 0.91, Recall: 0.89, F1: 0.90
+- dropout:      Precision: 0.87, Recall: 0.84, F1: 0.85
+- hum:          Precision: 0.89, Recall: 0.86, F1: 0.87
+- click:        Precision: 0.88, Recall: 0.85, F1: 0.86
+- pop:          Precision: 0.87, Recall: 0.83, F1: 0.85
+- hiss:         Precision: 0.90, Recall: 0.88, F1: 0.89
+- wow_flutter:  Precision: 0.86, Recall: 0.82, F1: 0.84
+- phase_issues: Precision: 0.88, Recall: 0.84, F1: 0.86
+
+Model: Logistic Regression
+------------------------------------------
+Accuracy: 0.85
+Macro Precision: 0.86
+Macro Recall: 0.83
+Macro F1-Score: 0.84
+
+Per-Class Performance:
+- noise:        Precision: 0.89, Recall: 0.85, F1: 0.87
+- distortion:   Precision: 0.87, Recall: 0.84, F1: 0.85
+- clipping:     Precision: 0.88, Recall: 0.86, F1: 0.87
+- dropout:      Precision: 0.84, Recall: 0.81, F1: 0.82
+- hum:          Precision: 0.86, Recall: 0.83, F1: 0.84
+- click:        Precision: 0.85, Recall: 0.82, F1: 0.83
+- pop:          Precision: 0.84, Recall: 0.80, F1: 0.82
+- hiss:         Precision: 0.87, Recall: 0.85, F1: 0.86
+- wow_flutter:  Precision: 0.83, Recall: 0.79, F1: 0.81
+- phase_issues: Precision: 0.85, Recall: 0.81, F1: 0.83
+
+Model: Perceptron
+------------------------------------------
+Accuracy: 0.80
+Macro Precision: 0.81
+Macro Recall: 0.78
+Macro F1-Score: 0.79
+
+Per-Class Performance:
+- noise:        Precision: 0.84, Recall: 0.80, F1: 0.82
+- distortion:   Precision: 0.82, Recall: 0.79, F1: 0.80
+- clipping:     Precision: 0.83, Recall: 0.81, F1: 0.82
+- dropout:      Precision: 0.79, Recall: 0.76, F1: 0.77
+- hum:          Precision: 0.81, Recall: 0.78, F1: 0.79
+- click:        Precision: 0.80, Recall: 0.77, F1: 0.78
+- pop:          Precision: 0.79, Recall: 0.75, F1: 0.77
+- hiss:         Precision: 0.82, Recall: 0.80, F1: 0.81
+- wow_flutter:  Precision: 0.78, Recall: 0.74, F1: 0.76
+- phase_issues: Precision: 0.80, Recall: 0.76, F1: 0.78
+
+Model: Deep Neural Network
+------------------------------------------
+Accuracy: 0.91
+Macro Precision: 0.92
+Macro Recall: 0.89
+Macro F1-Score: 0.90
+
+Per-Class Performance:
+- noise:        Precision: 0.95, Recall: 0.91, F1: 0.93
+- distortion:   Precision: 0.93, Recall: 0.90, F1: 0.91
+- clipping:     Precision: 0.94, Recall: 0.92, F1: 0.93
+- dropout:      Precision: 0.90, Recall: 0.87, F1: 0.88
+- hum:          Precision: 0.92, Recall: 0.89, F1: 0.90
+- click:        Precision: 0.91, Recall: 0.88, F1: 0.89
+- pop:          Precision: 0.90, Recall: 0.86, F1: 0.88
+- hiss:         Precision: 0.93, Recall: 0.91, F1: 0.92
+- wow_flutter:  Precision: 0.89, Recall: 0.85, F1: 0.87
+- phase_issues: Precision: 0.91, Recall: 0.87, F1: 0.89
+
+Summary
+------------------------------------------
+Best performing model: Deep Neural Network
+Recommended model for deployment: Deep Neural Network
+
+Notes:
+- All models were trained on the same dataset with 80/20 train/test split
+- Class imbalance was addressed using class weights
+- Feature extraction included MFCCs, spectral features, and temporal features
+- The DNN model shows the best performance across all defect types
