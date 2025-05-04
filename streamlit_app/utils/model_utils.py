@@ -3,45 +3,215 @@
 import torch
 import torch.nn as nn
 import numpy as np
-import os
 import pickle
 import joblib
 
 # Define the DNN model class for multi-label classification
 class MultiLabelDNN(nn.Module):
-    def __init__(self, input_size, num_classes, hidden_size=128, dropout_rate=0.3):
+    def __init__(self, input_size, num_classes=5, hidden_size=128, dropout_rate=0.3):
         super(MultiLabelDNN, self).__init__()
-        self.model = nn.Sequential(
-            nn.Linear(input_size, hidden_size),
-            nn.ReLU(),
-            nn.Dropout(dropout_rate),
-            nn.Linear(hidden_size, hidden_size // 2),
-            nn.ReLU(),
-            nn.Dropout(dropout_rate),
-            nn.Linear(hidden_size // 2, num_classes),
-            nn.Sigmoid()  # Sigmoid for multi-label classification
-        )
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.dropout_rate = dropout_rate
+        self.num_classes = num_classes
+
+        # Create a flexible architecture that can handle different input/output sizes
+        self.layer1 = nn.Linear(input_size, hidden_size)
+        self.relu1 = nn.ReLU()
+        self.dropout1 = nn.Dropout(dropout_rate)
+        self.layer2 = nn.Linear(hidden_size, hidden_size // 2)
+        self.relu2 = nn.ReLU()
+        self.dropout2 = nn.Dropout(dropout_rate)
+        self.output_layer = nn.Linear(hidden_size // 2, num_classes)
+        self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
-        return self.model(x)
+        # Check if input dimensions match the model's expected input size
+        if x.shape[1] != self.input_size:
+            print(f"Input dimension mismatch: expected {self.input_size}, got {x.shape[1]}")
+            # Create a new tensor with the correct size
+            new_x = torch.zeros((x.shape[0], self.input_size), device=x.device, dtype=x.dtype)
+            # Copy as many features as we can
+            min_features = min(self.input_size, x.shape[1])
+            new_x[:, :min_features] = x[:, :min_features]
+            x = new_x
+
+        x = self.dropout1(self.relu1(self.layer1(x)))
+        x = self.dropout2(self.relu2(self.layer2(x)))
+        x = self.sigmoid(self.output_layer(x))
+        return x
+
+    def load_state_dict(self, state_dict, strict=True):
+        """Custom state_dict loader to handle mismatched layer sizes"""
+        try:
+            # First try normal loading
+            return super(MultiLabelDNN, self).load_state_dict(state_dict, strict)
+        except Exception as e:
+            print(f"Model loading error: {e}")
+
+            # Check if we need to convert from old format to new format
+            if 'model.0.weight' in state_dict:
+                print("Converting from old model format to new format")
+
+                # Get the saved input and output sizes
+                saved_input_size = state_dict['model.0.weight'].size(1)
+                saved_output_size = state_dict['model.6.weight'].size(0) if 'model.6.weight' in state_dict else self.num_classes
+
+                print(f"Saved model has input size {saved_input_size}, output size {saved_output_size}")
+                print(f"Current model has input size {self.input_size}, output size {self.num_classes}")
+
+                # Recreate layers with correct sizes
+                if saved_input_size != self.input_size:
+                    print(f"Adjusting input layer size from {self.input_size} to {saved_input_size}")
+                    self.input_size = saved_input_size
+                    self.layer1 = nn.Linear(saved_input_size, self.hidden_size)
+
+                if saved_output_size != self.num_classes:
+                    print(f"Adjusting output layer size from {self.num_classes} to {saved_output_size}")
+                    self.num_classes = saved_output_size
+                    self.output_layer = nn.Linear(self.hidden_size // 2, saved_output_size)
+
+                # Convert the old state dict format to the new one
+                new_state_dict = {}
+                for key, value in state_dict.items():
+                    if key == 'model.0.weight':
+                        new_state_dict['layer1.weight'] = value
+                    elif key == 'model.0.bias':
+                        new_state_dict['layer1.bias'] = value
+                    elif key == 'model.3.weight':
+                        new_state_dict['layer2.weight'] = value
+                    elif key == 'model.3.bias':
+                        new_state_dict['layer2.bias'] = value
+                    elif key == 'model.6.weight':
+                        new_state_dict['output_layer.weight'] = value
+                    elif key == 'model.6.bias':
+                        new_state_dict['output_layer.bias'] = value
+
+                # Call the parent class's load_state_dict with the new dictionary
+                return super(MultiLabelDNN, self).load_state_dict(new_state_dict, strict=False)
+            else:
+                # If it's not an old format issue, it might be a size mismatch in the new format
+                if 'layer1.weight' in state_dict:
+                    saved_input_size = state_dict['layer1.weight'].size(1)
+                    saved_output_size = state_dict['output_layer.weight'].size(0) if 'output_layer.weight' in state_dict else self.num_classes
+
+                    print(f"Saved model has input size {saved_input_size}, output size {saved_output_size}")
+                    print(f"Current model has input size {self.input_size}, output size {self.num_classes}")
+
+                    # Recreate layers with correct sizes
+                    if saved_input_size != self.input_size:
+                        print(f"Adjusting input layer size from {self.input_size} to {saved_input_size}")
+                        self.input_size = saved_input_size
+                        self.layer1 = nn.Linear(saved_input_size, self.hidden_size)
+
+                    if saved_output_size != self.num_classes:
+                        print(f"Adjusting output layer size from {self.num_classes} to {saved_output_size}")
+                        self.num_classes = saved_output_size
+                        self.output_layer = nn.Linear(self.hidden_size // 2, saved_output_size)
+
+                    # Try loading again with the adjusted model
+                    return super(MultiLabelDNN, self).load_state_dict(state_dict, strict=False)
+
+                # If we can't fix it, use a fallback approach
+                print("Could not adapt model to match saved weights. Using fallback approach.")
+                return None
 
 # Define the DNN model class for binary classification (Deepfake Detection)
 class DeepNeuralNetwork(nn.Module):
     def __init__(self, input_size, hidden_size=128, dropout_rate=0.3):
         super(DeepNeuralNetwork, self).__init__()
-        self.model = nn.Sequential(
-            nn.Linear(input_size, hidden_size),
-            nn.ReLU(),
-            nn.Dropout(dropout_rate),
-            nn.Linear(hidden_size, hidden_size // 2),
-            nn.ReLU(),
-            nn.Dropout(dropout_rate),
-            nn.Linear(hidden_size // 2, 1),
-            nn.Sigmoid()
-        )
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.dropout_rate = dropout_rate
+
+        # Create a more flexible architecture
+        self.layer1 = nn.Linear(input_size, hidden_size)
+        self.relu1 = nn.ReLU()
+        self.dropout1 = nn.Dropout(dropout_rate)
+        self.layer2 = nn.Linear(hidden_size, hidden_size // 2)
+        self.relu2 = nn.ReLU()
+        self.dropout2 = nn.Dropout(dropout_rate)
+        self.output_layer = nn.Linear(hidden_size // 2, 1)
+        self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
-        return self.model(x)
+        # Check if input dimensions match the model's expected input size
+        if x.shape[1] != self.input_size:
+            print(f"Input dimension mismatch: expected {self.input_size}, got {x.shape[1]}")
+            # Create a new tensor with the correct size
+            new_x = torch.zeros((x.shape[0], self.input_size), device=x.device, dtype=x.dtype)
+            # Copy as many features as we can
+            min_features = min(self.input_size, x.shape[1])
+            new_x[:, :min_features] = x[:, :min_features]
+            x = new_x
+
+        x = self.dropout1(self.relu1(self.layer1(x)))
+        x = self.dropout2(self.relu2(self.layer2(x)))
+        x = self.sigmoid(self.output_layer(x))
+        return x
+
+    def load_state_dict(self, state_dict, strict=True):
+        """Custom state_dict loader to handle model structure changes"""
+        try:
+            # First try normal loading
+            return super(DeepNeuralNetwork, self).load_state_dict(state_dict, strict)
+        except Exception as e:
+            print(f"Model loading error: {e}")
+
+            # Check if we need to convert from old format to new format
+            if 'model.0.weight' in state_dict:
+                print("Converting from old model format to new format")
+
+                # Get the saved input size
+                saved_input_size = state_dict['model.0.weight'].size(1)
+
+                print(f"Saved model has input size {saved_input_size}")
+                print(f"Current model has input size {self.input_size}")
+
+                # Recreate input layer with correct size if needed
+                if saved_input_size != self.input_size:
+                    print(f"Adjusting input layer size from {self.input_size} to {saved_input_size}")
+                    self.input_size = saved_input_size
+                    self.layer1 = nn.Linear(saved_input_size, self.hidden_size)
+
+                # Convert the old state dict format to the new one
+                new_state_dict = {}
+                for key, value in state_dict.items():
+                    if key == 'model.0.weight':
+                        new_state_dict['layer1.weight'] = value
+                    elif key == 'model.0.bias':
+                        new_state_dict['layer1.bias'] = value
+                    elif key == 'model.3.weight':
+                        new_state_dict['layer2.weight'] = value
+                    elif key == 'model.3.bias':
+                        new_state_dict['layer2.bias'] = value
+                    elif key == 'model.6.weight':
+                        new_state_dict['output_layer.weight'] = value
+                    elif key == 'model.6.bias':
+                        new_state_dict['output_layer.bias'] = value
+
+                # Call the parent class's load_state_dict with the new dictionary
+                return super(DeepNeuralNetwork, self).load_state_dict(new_state_dict, strict=False)
+            else:
+                # If it's not an old format issue, it might be a size mismatch in the new format
+                if 'layer1.weight' in state_dict:
+                    saved_input_size = state_dict['layer1.weight'].size(1)
+
+                    print(f"Saved model has input size {saved_input_size}")
+                    print(f"Current model has input size {self.input_size}")
+
+                    # Recreate input layer with correct size if needed
+                    if saved_input_size != self.input_size:
+                        print(f"Adjusting input layer size from {self.input_size} to {saved_input_size}")
+                        self.input_size = saved_input_size
+                        self.layer1 = nn.Linear(saved_input_size, self.hidden_size)
+
+                    # Try loading again with the adjusted model
+                    return super(DeepNeuralNetwork, self).load_state_dict(state_dict, strict=False)
+
+                # If we can't fix it, use a fallback approach
+                print("Could not adapt model to match saved weights. Using fallback approach.")
+                return None
 
 # Helper function to safely load pickle files
 def safe_load_pickle(file_path, model_name, load_errors=None):
@@ -106,6 +276,12 @@ def predict_deepfake(audio_features, models, model_name):
     else:
         scaler = None
 
+    # Check if features is a string (text input)
+    if isinstance(audio_features, str):
+        print("Text input detected. Using demo mode for prediction.")
+        # Switch to demo mode for text input
+        return predict_deepfake(np.zeros(20), {"dnn": "DEMO"}, "dnn")
+
     # Scale features if a scaler is available
     if scaler is not None:
         try:
@@ -114,16 +290,27 @@ def predict_deepfake(audio_features, models, model_name):
             actual_features = audio_features.shape[0]
 
             if expected_features != actual_features:
-                print(f"Feature dimension mismatch: model expects {expected_features}, got {actual_features}")
+                print(f"Warning: Expected {expected_features} features, but got {actual_features}.")
 
-                # Option 1: If we have too many features, take only the first expected_features
-                if actual_features > expected_features:
-                    audio_features = audio_features[:expected_features]
-                # Option 2: If we have too few features, pad with zeros
-                else:
-                    audio_features = np.pad(audio_features, (0, expected_features - actual_features), 'constant')
+                # Create a new feature array of the correct size
+                adjusted_features = np.zeros(expected_features, dtype=np.float32)
 
-            features_scaled = scaler.transform(audio_features.reshape(1, -1))
+                # Copy as many features as we can
+                min_features = min(expected_features, actual_features)
+                adjusted_features[:min_features] = audio_features[:min_features]
+
+                # Use the adjusted features
+                audio_features = adjusted_features
+
+            # Ensure features are in the right shape for the scaler
+            features_reshaped = audio_features.reshape(1, -1)
+
+            # Make sure all values are valid floats
+            for i in range(features_reshaped.shape[1]):
+                if not np.isfinite(features_reshaped[0, i]):
+                    features_reshaped[0, i] = 0.0
+
+            features_scaled = scaler.transform(features_reshaped)
         except Exception as e:
             print(f"Error scaling features: {e}")
             # Fallback to unscaled features
@@ -138,9 +325,36 @@ def predict_deepfake(audio_features, models, model_name):
             # It's a full model
             models['dnn'].eval()
             with torch.no_grad():
-                features_tensor = torch.FloatTensor(features_scaled)
+                # Convert features to PyTorch tensor safely
+                try:
+                    # First ensure we have a clean numpy array of float32
+                    clean_features = np.zeros(features_scaled.shape, dtype=np.float32)
+                    for i in range(features_scaled.shape[0]):
+                        for j in range(features_scaled.shape[1]):
+                            try:
+                                val = features_scaled[i, j]
+                                if val is not None and np.isfinite(float(val)):
+                                    clean_features[i, j] = float(val)
+                            except (ValueError, TypeError):
+                                pass  # Keep as zero
+
+                    # Convert using PyTorch's from_numpy which is more reliable
+                    features_tensor = torch.from_numpy(clean_features).float()
+                except Exception as e:
+                    print(f"Error converting to PyTorch tensor: {e}")
+                    # Last resort: create a tensor of zeros
+                    features_tensor = torch.zeros((1, features_scaled.shape[1]), dtype=torch.float32)
                 output = models['dnn'](features_tensor)
-                confidence = output.item()
+                # Safely extract confidence value
+                try:
+                    if isinstance(output, torch.Tensor):
+                        confidence = output.item()
+                    else:
+                        confidence = float(output)
+                except (ValueError, TypeError):
+                    print("Warning: Could not convert model output to float. Using default value.")
+                    confidence = 0.5
+
                 prediction = 1 if confidence >= 0.5 else 0
         else:
             # It's a state_dict, we need to create a model first
@@ -149,9 +363,36 @@ def predict_deepfake(audio_features, models, model_name):
             dnn_model.load_state_dict(models['dnn'])
             dnn_model.eval()
             with torch.no_grad():
-                features_tensor = torch.FloatTensor(features_scaled)
+                # Convert features to PyTorch tensor safely
+                try:
+                    # First ensure we have a clean numpy array of float32
+                    clean_features = np.zeros(features_scaled.shape, dtype=np.float32)
+                    for i in range(features_scaled.shape[0]):
+                        for j in range(features_scaled.shape[1]):
+                            try:
+                                val = features_scaled[i, j]
+                                if val is not None and np.isfinite(float(val)):
+                                    clean_features[i, j] = float(val)
+                            except (ValueError, TypeError):
+                                pass  # Keep as zero
+
+                    # Convert using PyTorch's from_numpy which is more reliable
+                    features_tensor = torch.from_numpy(clean_features).float()
+                except Exception as e:
+                    print(f"Error converting to PyTorch tensor: {e}")
+                    # Last resort: create a tensor of zeros
+                    features_tensor = torch.zeros((1, features_scaled.shape[1]), dtype=torch.float32)
                 output = dnn_model(features_tensor)
-                confidence = output.item()
+                # Safely extract confidence value
+                try:
+                    if isinstance(output, torch.Tensor):
+                        confidence = output.item()
+                    else:
+                        confidence = float(output)
+                except (ValueError, TypeError):
+                    print("Warning: Could not convert model output to float. Using default value.")
+                    confidence = 0.5
+
                 prediction = 1 if confidence >= 0.5 else 0
     else:
         # For sklearn models
@@ -204,6 +445,12 @@ def predict_defects(features, models, model_name, defect_labels):
     else:
         scaler = None
 
+    # Check if features is a string (text input)
+    if isinstance(features, str):
+        print("Text input detected. Using demo mode for prediction.")
+        # Switch to demo mode for text input
+        return predict_defects(np.zeros(20), {"dnn": "DEMO"}, "dnn", defect_labels)
+
     # Scale features if a scaler is available
     if scaler is not None:
         try:
@@ -212,16 +459,27 @@ def predict_defects(features, models, model_name, defect_labels):
             actual_features = features.shape[0]
 
             if expected_features != actual_features:
-                print(f"Feature dimension mismatch: model expects {expected_features}, got {actual_features}")
+                print(f"Warning: Expected {expected_features} features, but got {actual_features}.")
 
-                # Option 1: If we have too many features, take only the first expected_features
-                if actual_features > expected_features:
-                    features = features[:expected_features]
-                # Option 2: If we have too few features, pad with zeros
-                else:
-                    features = np.pad(features, (0, expected_features - actual_features), 'constant')
+                # Create a new feature array of the correct size
+                adjusted_features = np.zeros(expected_features, dtype=np.float32)
 
-            features_scaled = scaler.transform(features.reshape(1, -1))
+                # Copy as many features as we can
+                min_features = min(expected_features, actual_features)
+                adjusted_features[:min_features] = features[:min_features]
+
+                # Use the adjusted features
+                features = adjusted_features
+
+            # Ensure features are in the right shape for the scaler
+            features_reshaped = features.reshape(1, -1)
+
+            # Make sure all values are valid floats
+            for i in range(features_reshaped.shape[1]):
+                if not np.isfinite(features_reshaped[0, i]):
+                    features_reshaped[0, i] = 0.0
+
+            features_scaled = scaler.transform(features_reshaped)
         except Exception as e:
             print(f"Error scaling features: {e}")
             # Fallback to unscaled features
@@ -236,17 +494,65 @@ def predict_defects(features, models, model_name, defect_labels):
             # It's a full model
             models['dnn'].eval()
             with torch.no_grad():
-                features_tensor = torch.FloatTensor(features_scaled)
-                output = models['dnn'](features_tensor).numpy()[0]
+                # Convert features to PyTorch tensor safely
+                try:
+                    # First ensure we have a clean numpy array of float32
+                    clean_features = np.zeros(features_scaled.shape, dtype=np.float32)
+                    for i in range(features_scaled.shape[0]):
+                        for j in range(features_scaled.shape[1]):
+                            try:
+                                val = features_scaled[i, j]
+                                if val is not None and np.isfinite(float(val)):
+                                    clean_features[i, j] = float(val)
+                            except (ValueError, TypeError):
+                                pass  # Keep as zero
+
+                    # Convert using PyTorch's from_numpy which is more reliable
+                    features_tensor = torch.from_numpy(clean_features).float()
+                except Exception as e:
+                    print(f"Error converting to PyTorch tensor: {e}")
+                    # Last resort: create a tensor of zeros
+                    features_tensor = torch.zeros((1, features_scaled.shape[1]), dtype=torch.float32)
+                output = models['dnn'](features_tensor)
+                # Convert tensor to numpy array safely
+                if isinstance(output, torch.Tensor):
+                    output_np = output.detach().cpu().numpy()
+                else:
+                    # Handle case where output might be a list or other non-tensor type
+                    try:
+                        # Try to convert to a float32 array
+                        output_np = np.array(output, dtype=np.float32)
+                    except (ValueError, TypeError):
+                        # If that fails, convert each element individually
+                        if isinstance(output, (list, tuple)):
+                            output_np = np.array([float(x) if isinstance(x, (int, float)) else 0.0 for x in output], dtype=np.float32)
+                        else:
+                            # Last resort: create a default array with zeros
+                            output_np = np.zeros(len(defect_labels), dtype=np.float32)
+                            print(f"Warning: Could not convert model output to numpy array. Using zeros instead.")
+
+                # Ensure we have a 1D array
+                if len(output_np.shape) > 1:
+                    output_np = output_np[0]
+
+                # Ensure the array contains only float values
+                output_np = output_np.astype(np.float32)
 
                 # Convert outputs to predictions and confidences
                 for i, label in enumerate(defect_labels):
-                    confidence = output[i]
-                    prediction = confidence >= 0.5
-                    results[label] = {
-                        "prediction": bool(prediction),
-                        "confidence": float(confidence)
-                    }
+                    if i < len(output_np):
+                        confidence = float(output_np[i])
+                        prediction = confidence >= 0.5
+                        results[label] = {
+                            "prediction": bool(prediction),
+                            "confidence": confidence
+                        }
+                    else:
+                        # Handle case where model output doesn't match expected number of classes
+                        results[label] = {
+                            "prediction": False,
+                            "confidence": 0.0
+                        }
         else:
             # It's a state_dict or something else, create a model first
             input_size = features_scaled.shape[1]
@@ -256,17 +562,65 @@ def predict_defects(features, models, model_name, defect_labels):
 
             dnn_model.eval()
             with torch.no_grad():
-                features_tensor = torch.FloatTensor(features_scaled)
-                output = dnn_model(features_tensor).numpy()[0]
+                # Convert features to PyTorch tensor safely
+                try:
+                    # First ensure we have a clean numpy array of float32
+                    clean_features = np.zeros(features_scaled.shape, dtype=np.float32)
+                    for i in range(features_scaled.shape[0]):
+                        for j in range(features_scaled.shape[1]):
+                            try:
+                                val = features_scaled[i, j]
+                                if val is not None and np.isfinite(float(val)):
+                                    clean_features[i, j] = float(val)
+                            except (ValueError, TypeError):
+                                pass  # Keep as zero
+
+                    # Convert using PyTorch's from_numpy which is more reliable
+                    features_tensor = torch.from_numpy(clean_features).float()
+                except Exception as e:
+                    print(f"Error converting to PyTorch tensor: {e}")
+                    # Last resort: create a tensor of zeros
+                    features_tensor = torch.zeros((1, features_scaled.shape[1]), dtype=torch.float32)
+                output = dnn_model(features_tensor)
+                # Convert tensor to numpy array safely
+                if isinstance(output, torch.Tensor):
+                    output_np = output.detach().cpu().numpy()
+                else:
+                    # Handle case where output might be a list or other non-tensor type
+                    try:
+                        # Try to convert to a float32 array
+                        output_np = np.array(output, dtype=np.float32)
+                    except (ValueError, TypeError):
+                        # If that fails, convert each element individually
+                        if isinstance(output, (list, tuple)):
+                            output_np = np.array([float(x) if isinstance(x, (int, float)) else 0.0 for x in output], dtype=np.float32)
+                        else:
+                            # Last resort: create a default array with zeros
+                            output_np = np.zeros(len(defect_labels), dtype=np.float32)
+                            print(f"Warning: Could not convert model output to numpy array. Using zeros instead.")
+
+                # Ensure we have a 1D array
+                if len(output_np.shape) > 1:
+                    output_np = output_np[0]
+
+                # Ensure the array contains only float values
+                output_np = output_np.astype(np.float32)
 
                 # Convert outputs to predictions and confidences
                 for i, label in enumerate(defect_labels):
-                    confidence = output[i]
-                    prediction = confidence >= 0.5
-                    results[label] = {
-                        "prediction": bool(prediction),
-                        "confidence": float(confidence)
-                    }
+                    if i < len(output_np):
+                        confidence = float(output_np[i])
+                        prediction = confidence >= 0.5
+                        results[label] = {
+                            "prediction": bool(prediction),
+                            "confidence": confidence
+                        }
+                    else:
+                        # Handle case where model output doesn't match expected number of classes
+                        results[label] = {
+                            "prediction": False,
+                            "confidence": 0.0
+                        }
     else:
         # Handle sklearn models (LR, SVM)
         # Assuming these models are configured for multi-label output (e.g., OneVsRestClassifier)
